@@ -292,7 +292,10 @@ pub const HF = struct {
         const uri = try std.Uri.parse(url);
 
         var req = try self.client.request(.GET, uri, .{
-            .headers = .{ .authorization = self.authorization },
+            .headers = .{
+                .accept_encoding = .{ .override = "identity" },
+                .authorization = self.authorization,
+            },
         });
         defer req.deinit();
 
@@ -305,7 +308,8 @@ pub const HF = struct {
             return error.RequestFailed;
         }
 
-        const body = try res.reader(&.{}).readAlloc(self.allocator, res.head.content_length.?);
+        var transfer_buffer: [64 * 1024]u8 = undefined;
+        const body = try res.reader(&transfer_buffer).allocRemaining(self.allocator, .limited(64 * 1024 * 1024));
         defer self.allocator.free(body);
 
         const parsed = try std.json.parseFromSlice(

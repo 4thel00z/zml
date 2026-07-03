@@ -146,8 +146,27 @@ pub fn main(init: std.process.Init) !void {
     // Setup ZML environment
     var threaded = std.Io.Threaded.init(allocator, .{});
     defer threaded.deinit();
+    // Register VFS backends so --model=hf://... (and file/https/s3) can be resolved.
+    // (The upstream flux2 branch omits these registrations; mirrors examples/llama/main.zig.)
+    var http_client: std.http.Client = .{ .allocator = allocator, .io = threaded.io() };
+    try http_client.initDefaultProxies(allocator, init.environ_map);
+    defer http_client.deinit();
+
+    var vfs_file: zml.io.VFS.File = .init(allocator, threaded.io(), .{});
+    defer vfs_file.deinit();
+    var vfs_https: zml.io.VFS.HTTP = try .init(allocator, threaded.io(), &http_client, .https);
+    defer vfs_https.deinit();
+    var hf_vfs: zml.io.VFS.HF = try .auto(allocator, threaded.io(), &http_client, init.environ_map);
+    defer hf_vfs.deinit();
+    var s3_vfs: zml.io.VFS.S3 = try .auto(allocator, threaded.io(), &http_client, init.environ_map);
+    defer s3_vfs.deinit();
+
     var vfs = try zml.io.VFS.init(allocator, threaded.io());
     defer vfs.deinit();
+    try vfs.register("file", vfs_file.io());
+    try vfs.register("https", vfs_https.io());
+    try vfs.register("hf", hf_vfs.io());
+    try vfs.register("s3", s3_vfs.io());
 
     const io = vfs.io();
     const args = stdx.flags.parse(init.minimal.args, CliArgs);
